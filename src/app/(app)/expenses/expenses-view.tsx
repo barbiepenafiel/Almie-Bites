@@ -23,7 +23,7 @@ import { RecoveryDialog, type RecoveryDraft } from "@/components/recovery/recove
 import { useAppData } from "@/components/app/app-data";
 import { unwrap, useQuery } from "@/hooks/use-query";
 import { createClient } from "@/lib/supabase/client";
-import { errorMessage, formatPeso, formatQty } from "@/lib/format";
+import { errorMessage, expenseQtyLabel, formatPeso, formatQty } from "@/lib/format";
 import { describeRange, formatDate, rangeForPreset, type DateRange } from "@/lib/dates";
 import { fetchDaily, fetchExpenseCategories, groupRows, totalsOf, type Grouping } from "@/lib/report-utils";
 import type { Expense } from "@/lib/types";
@@ -189,8 +189,9 @@ export function ExpensesView() {
                           <span className="sm:hidden">{formatDate(e.expense_date)}</span>
                           {e.quantity != null && (
                             <span>
-                              Qty {formatQty(e.quantity)}
-                              {e.unit_price != null && ` @ ${formatPeso(e.unit_price)}`}
+                              {expenseQtyLabel(e.quantity, e.stock_added, e.inventory_items?.unit)}
+                              {e.unit_price != null &&
+                                ` @ ${formatPeso(e.unit_price)}${Number(e.stock_added) > 0 && Math.abs(Number(e.stock_added) - Number(e.quantity)) > 0.0005 ? "/pack" : ""}`}
                             </span>
                           )}
                           {Number(e.stock_added) > 0 && e.inventory_items && (

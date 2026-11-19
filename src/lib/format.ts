@@ -21,6 +21,98 @@ export function formatQty(value: number | string | null | undefined): string {
   return qty.format(Number(value ?? 0) || 0);
 }
 
+const UNIT_SHORT: Record<string, [string, string]> = {
+  piece: ["pc", "pcs"],
+  pack: ["pack", "packs"],
+  kg: ["kg", "kg"],
+  kilo: ["kg", "kg"],
+  gram: ["g", "g"],
+  liter: ["L", "L"],
+  ml: ["ml", "ml"],
+  bottle: ["bottle", "bottles"],
+  sachet: ["sachet", "sachets"],
+  box: ["box", "boxes"],
+  dozen: ["dozen", "dozen"],
+  tray: ["tray", "trays"],
+};
+
+/**
+ * Quantity of an expense with its unit, e.g. "4 packs", "17 pcs", "2.05 kg".
+ * A restock entered by packs adds more to stock (pieces) than the quantity
+ * typed (packs), which is how packs are told apart from pieces.
+ */
+export function expenseQtyLabel(
+  quantity: number | string | null | undefined,
+  stockAdded: number | string | null | undefined,
+  unit?: string | null,
+): string {
+  const q = toNumber(quantity);
+  return formatUnitQty(q, expenseUnit(q, stockAdded, unit));
+}
+
+/** "pack" for a restock entered by packs, otherwise the item's unit (lower-case), or "" if unknown. */
+export function expenseUnit(
+  quantity: number | string | null | undefined,
+  stockAdded: number | string | null | undefined,
+  unit?: string | null,
+): string {
+  const q = toNumber(quantity);
+  const added = toNumber(stockAdded);
+  if (added > 0 && Math.abs(added - q) > 0.0005) return "pack";
+  return (unit ?? "").trim().toLowerCase();
+}
+
+/** e.g. formatUnitQty(4, "pack") → "4 packs", formatUnitQty(2.05, "kg") → "2.05 kg". */
+export function formatUnitQty(q: number, unitKey: string): string {
+  if (!unitKey) return formatQty(q);
+  const short = UNIT_SHORT[unitKey];
+  return `${formatQty(q)} ${short ? short[q === 1 ? 0 : 1] : unitKey}`;
+}
+
+export interface ExpenseGroup {
+  key: string;
+  name: string;
+  category: string;
+  /** e.g. "4 packs + 17 pcs", or "" when no quantities were entered */
+  qtyLabel: string;
+  entries: number;
+  amount: number;
+}
+
+/** Combines a day's expenses with the same name and category into one line. */
+export function groupExpenses(
+  expenses: {
+    name: string;
+    amount: number | string;
+    quantity: number | string | null;
+    stock_added: number | string | null;
+    categories?: { name: string } | null;
+    inventory_items?: { unit: string } | null;
+  }[],
+): ExpenseGroup[] {
+  const groups = new Map<string, ExpenseGroup & { qty: Map<string, number> }>();
+  for (const e of expenses) {
+    const category = e.categories?.name ?? "Uncategorized";
+    const key = `${e.name.trim().toLowerCase()}|${category}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, name: e.name.trim(), category, qtyLabel: "", entries: 0, amount: 0, qty: new Map() };
+      groups.set(key, g);
+    }
+    g.entries += 1;
+    g.amount += toNumber(e.amount);
+    if (e.quantity != null) {
+      const u = expenseUnit(e.quantity, e.stock_added, e.inventory_items?.unit);
+      g.qty.set(u, (g.qty.get(u) ?? 0) + toNumber(e.quantity));
+    }
+  }
+  return Array.from(groups.values()).map(({ qty, ...g }) => ({
+    ...g,
+    amount: Math.round(g.amount * 100) / 100,
+    qtyLabel: Array.from(qty, ([u, n]) => formatUnitQty(Math.round(n * 1000) / 1000, u)).join(" + "),
+  }));
+}
+
 export function toNumber(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;

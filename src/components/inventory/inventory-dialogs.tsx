@@ -375,6 +375,10 @@ export function StockDialog({
     if (qty === "" || !Number.isFinite(Number(qty))) return setError("Enter a quantity.");
     if (mode === "stock_count" ? q < 0 : q <= 0) return setError("Quantity must be greater than zero.");
     const recordExpense = mode === "restock" && asExpense;
+    // By packs the last pack price is a fair default; by pieces/kilos it would be an
+    // average cost, not what was paid, so the real amount must be typed.
+    if (recordExpense && !packMode && amount === "")
+      return setError("Type the amount you actually paid (from your receipt).");
     const amt = amount === "" ? suggestedAmount : toNumber(amount);
     if (recordExpense && amt < 0) return setError("Amount can't be negative.");
     setError(null);
@@ -500,14 +504,25 @@ export function StockDialog({
               {asExpense && (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Amount paid (₱)" htmlFor="stock-amount" hint={suggestedAmount ? `Suggested ${formatPeso(suggestedAmount)}` : undefined}>
+                    <Field
+                      label={packMode ? "Amount paid (₱)" : "Amount paid (₱) *"}
+                      htmlFor="stock-amount"
+                      hint={
+                        packMode
+                          ? suggestedAmount
+                            ? `Leave empty to use ${formatPeso(suggestedAmount)} (last pack price)`
+                            : undefined
+                          : "Required — type what you paid"
+                      }
+                    >
                       <Input
                         id="stock-amount"
                         type="number"
                         inputMode="decimal"
                         min={0}
                         step="0.01"
-                        placeholder={suggestedAmount ? String(suggestedAmount) : "0.00"}
+                        required={!packMode}
+                        placeholder={packMode && suggestedAmount ? String(suggestedAmount) : "0.00"}
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
                       />

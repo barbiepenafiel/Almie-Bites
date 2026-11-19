@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Info, Loader2, Printer } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Download, FileDown, Info, Loader2, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,8 +11,9 @@ import { ErrorState, LoadingRows, PageHeader } from "@/components/app/common";
 import { useAppData } from "@/components/app/app-data";
 import { unwrap, useQuery } from "@/hooks/use-query";
 import { cn } from "@/lib/utils";
-import { downloadCsv, errorMessage, formatPeso, formatQty, money } from "@/lib/format";
+import { downloadCsv, errorMessage, formatPeso, groupExpenses, formatQty, money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
+import { exportBlocksToPdf } from "@/lib/pdf";
 import { addDays, formatDate, formatDateTime, formatTime, manilaEndExclusiveISO, manilaStartISO, todayManila } from "@/lib/dates";
 import { fetchDaily, fetchExpenseCategories, fetchPayments, fetchProducts, fetchStaffReport, totalsOf } from "@/lib/report-utils";
 import type { Expense, Sale } from "@/lib/types";
@@ -22,6 +23,31 @@ export function SummaryView() {
   const today = todayManila();
   const [date, setDate] = useState(today);
   const [downloading, setDownloading] = useState(false);
+  const [makingPdf, setMakingPdf] = useState(false);
+  const pdfRef = useRef<HTMLDivElement>(null);
+
+  /** PDF of exactly what prints: the page title/date + the summary sections. */
+  async function downloadPdf() {
+    const root = pdfRef.current;
+    if (!root || !data) return;
+    setMakingPdf(true);
+    try {
+      const header = root.firstElementChild as HTMLElement | null;
+      const area = root.querySelector<HTMLElement>(".print-area");
+      const blocks = [header, ...(area ? (Array.from(area.children) as HTMLElement[]) : [])].filter(Boolean) as HTMLElement[];
+      const business = settings?.business_name ?? "Almie Bites";
+      await exportBlocksToPdf(
+        blocks,
+        `${business.replace(/[^\w]+/g, "-").toLowerCase()}_daily-summary_${date}.pdf`,
+        `${business} · Daily Summary · ${formatDate(date)}`,
+      );
+      toast.success("Daily summary PDF downloaded");
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't create the PDF. Try Print → Save as PDF instead."));
+    } finally {
+      setMakingPdf(false);
+    }
+  }
 
   const { data, error, loading, reload } = useQuery(
     async (sb) => {
@@ -30,7 +56,7 @@ export function SummaryView() {
         fetchProducts(sb, date, date),
         fetchPayments(sb, date, date),
         fetchExpenseCategories(sb, date, date),
-        sb.from("expenses").select("*, categories(id, name, is_inventory_purchase)").eq("expense_date", date).order("created_at"),
+        sb.from("expenses").select("*, categories(id, name, is_inventory_purchase), inventory_items(id, name, unit)").eq("expense_date", date).order("created_at"),
       ]);
       return { daily, products, payments, cats, expenses: unwrap(expenses) as Expense[] };
     },
@@ -38,6 +64,7 @@ export function SummaryView() {
     { realtime: ["sales", "expenses"] },
   );
   const t = useMemo(() => totalsOf(data?.daily ?? []), [data]);
+  const expenseGroups = useMemo(() => groupExpenses(data?.expenses ?? []), [data]);
 
   const summaryRows: { label: string; value: number; strong?: boolean; tone?: "pos" | "neg"; note?: string }[] = [
     { label: "Gross sales", value: t.sales, note: "All completed sales before expenses" },
@@ -116,11 +143,9 @@ export function SummaryView() {
         ]),
       );
 
-      section("Expenses", ["Expense", "Category", "Quantity", "Payment", "Notes", "Amount (PHP)"]);
-      data.expenses.forEach((e) =>
-        rows.push([e.name, e.categories?.name ?? "Uncategorized", e.quantity ?? "", e.payment_method, e.notes ?? "", money(Number(e.amount))]),
-      );
-      rows.push(["Total", "", "", "", "", money(t.expenses)]);
+      section("Expenses", ["Expense", "Category", "Quantity", "Purchases", "Amount (PHP)"]);
+      expenseGroups.forEach((g) => rows.push([g.name, g.category, g.qtyLabel, g.entries, money(g.amount)]));
+      rows.push(["Total", "", "", data.expenses.length, money(t.expenses)]);
 
       section("Expenses by category", ["Category", "Entries", "Amount (PHP)"]);
       data.cats.forEach((c) => rows.push([c.category_name, c.entries, money(Number(c.total))]));
@@ -135,7 +160,7 @@ export function SummaryView() {
   }
 
   return (
-    <>
+    <div ref={pdfRef}>
       <PageHeader
         title="Daily Summary"
         description={`${settings?.business_name ?? "Almie Bites"} · ${formatDate(date, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`}
@@ -155,8 +180,11 @@ export function SummaryView() {
                 Today
               </Button>
             )}
-            <Button onClick={downloadSummary} disabled={!data || downloading}>
-              {downloading ? <Loader2 className="animate-spin" /> : <Download />} Download
+            <Button onClick={downloadPdf} disabled={!data || makingPdf}>
+              {makingPdf ? <Loader2 className="animate-spin" /> : <FileDown />} {makingPdf ? "Making PDF…" : "Download PDF"}
+            </Button>
+            <Button variant="outline" onClick={downloadSummary} disabled={!data || downloading}>
+              {downloading ? <Loader2 className="animate-spin" /> : <Download />} CSV
             </Button>
             <Button variant="outline" onClick={() => window.print()}>
               <Printer /> Print
@@ -305,14 +333,14 @@ export function SummaryView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.expenses.map((e) => (
-                        <TableRow key={e.id}>
+                      {expenseGroups.map((g) => (
+                        <TableRow key={g.key}>
                           <TableCell className="pl-4">
-                            {e.name}
-                            {e.quantity != null && <span className="text-xs text-muted-foreground"> × {formatQty(e.quantity)}</span>}
+                            {g.name}
+                            {g.qtyLabel && <span className="text-xs text-muted-foreground"> × {g.qtyLabel}</span>}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{e.categories?.name ?? "Uncategorized"}</TableCell>
-                          <TableCell className="pr-4 text-right tabular-nums">{formatPeso(e.amount)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{g.category}</TableCell>
+                          <TableCell className="pr-4 text-right tabular-nums">{formatPeso(g.amount)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -342,6 +370,6 @@ export function SummaryView() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
