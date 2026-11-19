@@ -35,6 +35,7 @@ export function StaffDashboard() {
   const zeroCount = (data?.products ?? []).filter((p) => p.sold_today === 0).length;
   const busy = loading && !data;
   const tiered = profile?.earning_type === "daily_tier";
+  const manual = profile?.earning_type === "manual";
   const upcoming = tiered ? nextTier(profile?.pay_tiers, s?.sales_total ?? 0) : null;
 
   return (
@@ -67,7 +68,7 @@ export function StaffDashboard() {
         </div>
         <StatCard label="Products sold" value={formatQty(s?.items_sold)} icon={Package} loading={busy} />
         <StatCard
-          label={tiered ? "Estimated pay today" : "My earnings today"}
+          label={manual ? "Paid to me today" : tiered ? "Estimated pay today" : "My earnings today"}
           value={formatPeso(s?.earnings)}
           icon={PiggyBank}
           loading={busy}

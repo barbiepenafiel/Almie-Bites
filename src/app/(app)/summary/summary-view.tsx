@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Info, Printer } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Info, Loader2, Printer } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,15 +11,17 @@ import { ErrorState, LoadingRows, PageHeader } from "@/components/app/common";
 import { useAppData } from "@/components/app/app-data";
 import { unwrap, useQuery } from "@/hooks/use-query";
 import { cn } from "@/lib/utils";
-import { formatPeso, formatQty } from "@/lib/format";
-import { addDays, formatDate, todayManila } from "@/lib/dates";
-import { fetchDaily, fetchExpenseCategories, fetchPayments, fetchProducts, totalsOf } from "@/lib/report-utils";
-import type { Expense } from "@/lib/types";
+import { downloadCsv, errorMessage, formatPeso, formatQty, money } from "@/lib/format";
+import { createClient } from "@/lib/supabase/client";
+import { addDays, formatDate, formatDateTime, formatTime, manilaEndExclusiveISO, manilaStartISO, todayManila } from "@/lib/dates";
+import { fetchDaily, fetchExpenseCategories, fetchPayments, fetchProducts, fetchStaffReport, totalsOf } from "@/lib/report-utils";
+import type { Expense, Sale } from "@/lib/types";
 
 export function SummaryView() {
   const { settings } = useAppData();
   const today = todayManila();
   const [date, setDate] = useState(today);
+  const [downloading, setDownloading] = useState(false);
 
   const { data, error, loading, reload } = useQuery(
     async (sb) => {
@@ -53,6 +56,84 @@ export function SummaryView() {
     },
   ];
 
+  /** One CSV with everything for the selected day (fetched fresh). */
+  async function downloadSummary() {
+    if (!data) return;
+    setDownloading(true);
+    try {
+      const sb = createClient();
+      const [salesRes, staff] = await Promise.all([
+        sb
+          .from("sales")
+          .select("*, sale_items(product_name, quantity, unit_price, subtotal), staff(id, full_name)")
+          .gte("sold_at", manilaStartISO(date))
+          .lt("sold_at", manilaEndExclusiveISO(date))
+          .order("sold_at"),
+        fetchStaffReport(sb, date, date).catch(() => []),
+      ]);
+      if (salesRes.error) throw salesRes.error;
+      const sales = (salesRes.data ?? []) as Sale[];
+      const business = settings?.business_name ?? "Almie Bites";
+      const rows: (string | number)[][] = [];
+      const section = (title: string, header: string[]) => {
+        rows.push([]);
+        rows.push([title.toUpperCase()]);
+        rows.push(header);
+      };
+
+      rows.push(["Date", formatDate(date, { weekday: "long", month: "long", day: "numeric", year: "numeric" })]);
+      rows.push(["Generated", `${formatDateTime(new Date().toISOString())} (Philippine time)`]);
+
+      section("Financial summary", ["Item", "Amount (PHP)", "Note"]);
+      summaryRows.forEach((r) => rows.push([r.label, money(r.value), r.note ?? ""]));
+      rows.push(["Transactions", t.transactions, "Completed sales"]);
+      rows.push(["Products sold", t.items, "Pieces / items"]);
+      rows.push(["Average sale", money(t.averageSale), ""]);
+      rows.push(["Voided sales", t.voided, "Not counted in totals"]);
+
+      section("Sales by product", ["Product", "Quantity", "Sales (PHP)", "Cost of goods (PHP)", "Gross profit (PHP)"]);
+      data.products.forEach((p) => rows.push([p.product_name, Number(p.quantity), money(Number(p.revenue)), money(Number(p.cost)), money(Number(p.revenue) - Number(p.cost))]));
+      rows.push(["Total", t.items, money(t.sales), money(t.cogs), money(t.sales - t.cogs)]);
+
+      section("Sales by payment method", ["Payment method", "Transactions", "Amount (PHP)"]);
+      data.payments.forEach((p) => rows.push([p.payment_method, p.transactions, money(Number(p.total))]));
+
+      if (staff.length) {
+        section("Staff", ["Staff", "Transactions", "Products sold", "Sales (PHP)", "Pay (PHP)"]);
+        staff.forEach((r) => rows.push([r.full_name, r.transactions, Number(r.items_sold), money(Number(r.sales_total)), money(Number(r.earnings))]));
+      }
+
+      section("Sales transactions", ["Time", "Transaction #", "Sold by", "Payment", "Items", "Status", "Total (PHP)"]);
+      sales.forEach((x) =>
+        rows.push([
+          formatTime(x.sold_at),
+          x.transaction_number,
+          x.staff?.full_name ?? "Owner",
+          x.payment_method,
+          (x.sale_items ?? []).map((i) => `${i.product_name} x${formatQty(i.quantity)}`).join("; "),
+          x.status === "voided" ? "VOIDED" : "Completed",
+          money(Number(x.total_amount)),
+        ]),
+      );
+
+      section("Expenses", ["Expense", "Category", "Quantity", "Payment", "Notes", "Amount (PHP)"]);
+      data.expenses.forEach((e) =>
+        rows.push([e.name, e.categories?.name ?? "Uncategorized", e.quantity ?? "", e.payment_method, e.notes ?? "", money(Number(e.amount))]),
+      );
+      rows.push(["Total", "", "", "", "", money(t.expenses)]);
+
+      section("Expenses by category", ["Category", "Entries", "Amount (PHP)"]);
+      data.cats.forEach((c) => rows.push([c.category_name, c.entries, money(Number(c.total))]));
+
+      downloadCsv(`${business.replace(/[^\w]+/g, "-").toLowerCase()}_daily-summary_${date}.csv`, [`${business} - Daily Summary`], rows);
+      toast.success("Daily summary downloaded");
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't create the download."));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -74,6 +155,9 @@ export function SummaryView() {
                 Today
               </Button>
             )}
+            <Button onClick={downloadSummary} disabled={!data || downloading}>
+              {downloading ? <Loader2 className="animate-spin" /> : <Download />} Download
+            </Button>
             <Button variant="outline" onClick={() => window.print()}>
               <Printer /> Print
             </Button>

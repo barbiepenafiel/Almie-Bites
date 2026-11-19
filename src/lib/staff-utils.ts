@@ -32,6 +32,7 @@ export function describeTiers(tiers: PayTier[] | null | undefined) {
 }
 
 export function describeEarning(s: { earning_type: EarningType; commission_rate: number; rate_per_item: number; pay_tiers?: PayTier[] | null }) {
+  if (s.earning_type === "manual") return "Your pay is what the owner gives you (recorded as payments)";
   if (s.earning_type === "daily_tier") return `Daily pay from your total sales: ${describeTiers(s.pay_tiers)}`;
   if (s.earning_type === "after_recovery")
     return `${n(s.commission_rate)}% of sales after each product's expense is recovered`;

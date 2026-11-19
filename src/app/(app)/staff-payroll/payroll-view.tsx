@@ -259,7 +259,7 @@ function PaymentDialog({
   }, [open, preset]);
 
   const sel = staffRows.find((r) => r.staff_id === staffId);
-  const over = sel && toNumber(amount) > Number(sel.unpaid);
+  const over = sel && sel.earning_type !== "manual" && toNumber(amount) > Number(sel.unpaid);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

@@ -200,7 +200,7 @@ export const MOVEMENT_LABELS: Record<MovementType, string> = {
 /* ------------------------------------------------------------------ */
 /* Staff                                                              */
 /* ------------------------------------------------------------------ */
-export type EarningType = "daily_tier" | "profit_share" | "after_recovery" | "percentage" | "per_item" | "per_product";
+export type EarningType = "manual" | "daily_tier" | "profit_share" | "after_recovery" | "percentage" | "per_item" | "per_product";
 
 export interface PayTier {
   min_sales: number;
@@ -208,6 +208,7 @@ export interface PayTier {
 }
 
 export const EARNING_TYPE_LABELS: Record<EarningType, string> = {
+  manual: "Only what I pay (manual)",
   daily_tier: "Daily pay based on total sales",
   profit_share: "Percentage of gross profit (sales − cost)",
   after_recovery: "Commission after the expense is recovered",

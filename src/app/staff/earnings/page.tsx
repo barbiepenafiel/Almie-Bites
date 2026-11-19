@@ -23,6 +23,7 @@ export default function StaffEarningsPage() {
   });
   const busy = loading && !s;
   const tiered = profile?.earning_type === "daily_tier";
+  const manual = profile?.earning_type === "manual";
 
   return (
     <>
@@ -41,7 +42,14 @@ export default function StaffEarningsPage() {
       {error && <ErrorState message={error} onRetry={reload} />}
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Earned in this period" value={formatPeso(s?.earnings)} icon={PiggyBank} tone="brand" loading={busy} hint={`From ${formatPeso(s?.sales_total)} sales`} />
+        <StatCard
+          label={manual ? "Paid to me in this period" : "Earned in this period"}
+          value={formatPeso(s?.earnings)}
+          icon={PiggyBank}
+          tone="brand"
+          loading={busy}
+          hint={`You sold ${formatPeso(s?.sales_total)}`}
+        />
         <StatCard label="Total earned (all time)" value={formatPeso(s?.earned_total)} icon={Wallet} loading={busy} />
         <StatCard label="Already paid to me" value={formatPeso(s?.paid_total)} icon={BadgeCheck} loading={busy} />
         <StatCard label="Unpaid balance" value={formatPeso(s?.unpaid)} icon={Hourglass} tone={(s?.unpaid ?? 0) > 0 ? "warning" : "default"} loading={busy} />

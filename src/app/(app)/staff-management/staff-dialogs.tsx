@@ -226,6 +226,8 @@ export function RatesDialog({
 
   const assignedCount = Object.values(lines).filter((l) => l.assigned).length;
   const example = useMemo(() => {
+    if (type === "manual")
+      return "Sales don't calculate any pay. Whatever you record in Staff Earnings & Pay → Record payment is their pay.";
     if (type === "after_recovery")
       return `With a ₱200 juice target and ₱300 juice sales, the staff member earns ${toNumber(commission)}% of the ₱100 above target = ${formatPeso((100 * toNumber(commission)) / 100)}.`;
     if (type === "profit_share")
@@ -382,7 +384,7 @@ export function RatesDialog({
                   <TableHead className="w-10 pl-3" />
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Price</TableHead>
-                  {type !== "daily_tier" && type !== "profit_share" && type !== "after_recovery" && (
+                  {type !== "daily_tier" && type !== "profit_share" && type !== "after_recovery" && type !== "manual" && (
                     <TableHead className="w-36 pr-3">{type === "per_product" ? "Earns per item (₱)" : "Earns per item"}</TableHead>
                   )}
                 </TableRow>
@@ -406,7 +408,7 @@ export function RatesDialog({
                         {!p.is_available && <span className="text-xs text-muted-foreground"> · unavailable</span>}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{formatPeso(p.selling_price)}</TableCell>
-                      {type !== "daily_tier" && type !== "profit_share" && type !== "after_recovery" && <TableCell className="pr-3">
+                      {type !== "daily_tier" && type !== "profit_share" && type !== "after_recovery" && type !== "manual" && <TableCell className="pr-3">
                         {derived === null ? (
                           <Input
                             aria-label={`${p.name} earning rate`}
