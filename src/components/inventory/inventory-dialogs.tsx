@@ -7,14 +7,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Field, SimpleSelect, SubmitButton } from "@/components/app/common";
 import { useAppData } from "@/components/app/app-data";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { errorMessage, formatPeso, formatQty, money, toNumber } from "@/lib/format";
-import { todayManila } from "@/lib/dates";
+import { errorMessage, formatQty, toNumber } from "@/lib/format";
 import type { InventoryItem } from "@/lib/types";
 
 const UNIT_SUGGESTIONS = ["Piece", "Pack", "Kg", "Gram", "Liter", "ml", "Bottle", "Sachet", "Box", "Dozen", "Tray"];
@@ -313,18 +311,11 @@ export function StockDialog({
   defaultMode?: StockMode;
   onSaved?: () => void;
 }) {
-  const { categoriesOf, paymentMethods } = useAppData();
-  const expenseCats = categoriesOf("expense");
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [itemId, setItemId] = useState("");
   const [mode, setMode] = useState<StockMode>(defaultMode);
   const [qty, setQty] = useState("");
   const [notes, setNotes] = useState("");
-  const [asExpense, setAsExpense] = useState(true);
-  const [amount, setAmount] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [payment, setPayment] = useState("Cash");
-  const [updateCost, setUpdateCost] = useState(true);
   const [restockBy, setRestockBy] = useState<"packs" | "pieces">("packs");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -335,13 +326,8 @@ export function StockDialog({
     setMode(defaultMode);
     setQty("");
     setNotes("");
-    setAmount("");
     setError(null);
-    setAsExpense(true);
-    setUpdateCost(true);
     setRestockBy("packs");
-    setPayment(paymentMethods[0] ?? "Cash");
-    setCategoryId(expenseCats.find((c) => c.is_inventory_purchase)?.id ?? expenseCats[0]?.id ?? "");
     setItemId(item?.id ?? "");
     /* eslint-enable react-hooks/set-state-in-effect */
     if (!item) {
@@ -351,7 +337,6 @@ export function StockDialog({
         .order("name")
         .then(({ data }) => setItems((data ?? []) as InventoryItem[]));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item, defaultMode]);
 
   const selected = item ?? items.find((i) => i.id === itemId) ?? null;
@@ -363,56 +348,26 @@ export function StockDialog({
   const current = toNumber(selected?.current_stock);
   const resulting =
     mode === "restock" ? current + q : mode === "stock_count" ? q : current - q;
-  const suggestedAmount = selected
-    ? packMode && toNumber(selected.pack_price) > 0
-      ? money(entered * toNumber(selected.pack_price))
-      : money(q * toNumber(selected.purchase_price))
-    : 0;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selected) return setError("Choose an inventory item.");
     if (qty === "" || !Number.isFinite(Number(qty))) return setError("Enter a quantity.");
     if (mode === "stock_count" ? q < 0 : q <= 0) return setError("Quantity must be greater than zero.");
-    const recordExpense = mode === "restock" && asExpense;
-    // By packs the last pack price is a fair default; by pieces/kilos it would be an
-    // average cost, not what was paid, so the real amount must be typed.
-    if (recordExpense && !packMode && amount === "")
-      return setError("Type the amount you actually paid (from your receipt).");
-    const amt = amount === "" ? suggestedAmount : toNumber(amount);
-    if (recordExpense && amt < 0) return setError("Amount can't be negative.");
+    // Stock only: money spent is recorded by the owner in the Expenses section.
     setError(null);
     setBusy(true);
-    const supabase = createClient();
-    const { error: err } = recordExpense
-      ? await supabase.rpc("save_expense", {
-          p_data: {
-            name: selected.name,
-            category_id: categoryId || null,
-            amount: amt,
-            quantity: packMode ? entered : q,
-            unit_price: packMode ? (entered > 0 ? money(amt / entered) : null) : q > 0 ? money(amt / q) : null,
-            pack_price: packMode && entered > 0 ? money(amt / entered) : null,
-            inventory_item_id: selected.id,
-            add_to_stock: true,
-            stock_quantity: q,
-            update_item_cost: updateCost && amt > 0,
-            payment_method: payment,
-            notes: notes || null,
-            expense_date: todayManila(),
-          },
-        })
-      : await supabase.rpc("adjust_stock", {
-          p_item_id: selected.id,
-          p_type: mode === "deduct" ? "adjustment" : mode,
-          p_quantity: mode === "deduct" ? -q : q,
-          p_notes: notes || null,
-        });
+    const { error: err } = await createClient().rpc("adjust_stock", {
+      p_item_id: selected.id,
+      p_type: mode === "deduct" ? "adjustment" : mode,
+      p_quantity: mode === "deduct" ? -q : q,
+      p_notes: notes || null,
+    });
     setBusy(false);
     if (err) return setError(errorMessage(err));
     toast.success(
-      recordExpense
-        ? `Added ${packMode ? `${formatQty(entered)} pack(s) = ` : ""}${formatQty(q)} ${selected.unit} of ${selected.name} and recorded ${formatPeso(amt)} expense`
+      mode === "restock"
+        ? `Added ${packMode ? `${formatQty(entered)} pack(s) = ` : ""}${formatQty(q)} ${selected.unit} of ${selected.name}`
         : `${selected.name} stock updated`,
     );
     onOpenChange(false);
@@ -459,7 +414,6 @@ export function StockDialog({
                     onClick={() => {
                       setRestockBy(u);
                       setQty("");
-                      setAmount("");
                     }}
                     className={cn(
                       "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
@@ -491,61 +445,9 @@ export function StockDialog({
           </Field>
 
           {mode === "restock" && (
-            <div className="grid gap-3 rounded-lg border bg-muted/40 p-3">
-              <label className="flex items-start gap-2.5 text-sm">
-                <Checkbox checked={asExpense} onCheckedChange={(c) => setAsExpense(!!c)} className="mt-0.5" />
-                <span>
-                  <span className="font-medium">Also record this purchase as an expense</span>
-                  <span className="block text-xs text-muted-foreground">
-                    Records one expense and adds the stock together — no double entry.
-                  </span>
-                </span>
-              </label>
-              {asExpense && (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field
-                      label={packMode ? "Amount paid (₱)" : "Amount paid (₱) *"}
-                      htmlFor="stock-amount"
-                      hint={
-                        packMode
-                          ? suggestedAmount
-                            ? `Leave empty to use ${formatPeso(suggestedAmount)} (last pack price)`
-                            : undefined
-                          : "Required — type what you paid"
-                      }
-                    >
-                      <Input
-                        id="stock-amount"
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
-                        required={!packMode}
-                        placeholder={packMode && suggestedAmount ? String(suggestedAmount) : "0.00"}
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Payment method">
-                      <SimpleSelect aria-label="Payment method" value={payment} onChange={setPayment} options={paymentMethods.map((p) => ({ value: p, label: p }))} />
-                    </Field>
-                  </div>
-                  <Field label="Expense category">
-                    <SimpleSelect
-                      aria-label="Expense category"
-                      value={categoryId}
-                      onChange={setCategoryId}
-                      options={expenseCats.map((c) => ({ value: c.id, label: c.name }))}
-                    />
-                  </Field>
-                  <label className="flex items-center gap-2 text-sm">
-                    <Checkbox checked={updateCost} onCheckedChange={(c) => setUpdateCost(!!c)} />
-                    Update the item&apos;s cost per unit from this purchase
-                  </label>
-                </>
-              )}
-            </div>
+            <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              This only adds stock. Record what you paid in the Expenses section.
+            </p>
           )}
 
           <Field label="Reason / notes (optional)" htmlFor="stock-notes">

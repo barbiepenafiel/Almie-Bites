@@ -17,6 +17,7 @@ import { exportBlocksToPdf } from "@/lib/pdf";
 import { addDays, formatDate, formatDateTime, formatTime, manilaEndExclusiveISO, manilaStartISO, todayManila } from "@/lib/dates";
 import { fetchDaily, fetchExpenseCategories, fetchPayments, fetchProducts, fetchStaffReport, totalsOf } from "@/lib/report-utils";
 import type { Expense, Sale } from "@/lib/types";
+import { buildStaffSales, StaffCashTable, type JuiceSale, type StaffCashRecord } from "./staff-cash-table";
 
 export function SummaryView() {
   const { settings } = useAppData();
@@ -51,20 +52,47 @@ export function SummaryView() {
 
   const { data, error, loading, reload } = useQuery(
     async (sb) => {
-      const [daily, products, payments, cats, expenses] = await Promise.all([
+      const [daily, products, payments, cats, expenses, staff] = await Promise.all([
         fetchDaily(sb, date, date),
         fetchProducts(sb, date, date),
         fetchPayments(sb, date, date),
         fetchExpenseCategories(sb, date, date),
         sb.from("expenses").select("*, categories(id, name, is_inventory_purchase), inventory_items(id, name, unit)").eq("expense_date", date).order("created_at"),
+        fetchStaffReport(sb, date, date).catch(() => []),
       ]);
-      return { daily, products, payments, cats, expenses: unwrap(expenses) as Expense[] };
+      // Cash received + Juice income (empty until the migration is applied).
+      const [cash, juice] = await Promise.all([
+        sb.from("staff_cash").select("staff_id, cash, juice_sale_id").eq("day", date),
+        sb
+          .from("sales")
+          .select("staff_id, total_amount")
+          .eq("is_cash_over", true)
+          .eq("status", "completed")
+          .gte("sold_at", manilaStartISO(date))
+          .lt("sold_at", manilaEndExclusiveISO(date)),
+      ]);
+      return {
+        daily,
+        products,
+        payments,
+        cats,
+        expenses: unwrap(expenses) as Expense[],
+        staff,
+        cash: (cash.error ? [] : cash.data ?? []) as StaffCashRecord[],
+        juice: (juice.error ? [] : juice.data ?? []) as JuiceSale[],
+      };
     },
     [date],
     { realtime: ["sales", "expenses"] },
   );
   const t = useMemo(() => totalsOf(data?.daily ?? []), [data]);
   const expenseGroups = useMemo(() => groupExpenses(data?.expenses ?? []), [data]);
+
+  /** Each staff member's sales for the day (active staff, or anyone who sold), plus sales made by the owner. */
+  const staffSales = useMemo(
+    () => buildStaffSales(data?.staff ?? [], data?.cash ?? [], data?.juice ?? [], { transactions: t.transactions, items: t.items, sales: t.sales }),
+    [data, t],
+  );
 
   const summaryRows: { label: string; value: number; strong?: boolean; tone?: "pos" | "neg"; note?: string }[] = [
     { label: "Gross sales", value: t.sales, note: "All completed sales before expenses" },
@@ -125,9 +153,23 @@ export function SummaryView() {
       section("Sales by payment method", ["Payment method", "Transactions", "Amount (PHP)"]);
       data.payments.forEach((p) => rows.push([p.payment_method, p.transactions, money(Number(p.total))]));
 
-      if (staff.length) {
-        section("Staff", ["Staff", "Transactions", "Products sold", "Sales (PHP)", "Pay (PHP)"]);
-        staff.forEach((r) => rows.push([r.full_name, r.transactions, Number(r.items_sold), money(Number(r.sales_total)), money(Number(r.earnings))]));
+      if (staffSales.length) {
+        const pay = new Map(staff.map((r) => [r.staff_id, Number(r.earnings)]));
+        section("Sales by staff", ["Staff", "Transactions", "Products sold", "Sales (PHP)", "Cash received (PHP)", "Juice income (PHP)", "Short (PHP)", "Pay (PHP)"]);
+        staffSales.forEach((s) =>
+          rows.push([
+            s.name,
+            s.transactions,
+            s.items,
+            money(s.expected),
+            s.cash === null ? "" : money(s.cash),
+            s.juice ? money(s.juice) : "",
+            s.short ? money(s.short) : "",
+            pay.has(s.key) ? money(pay.get(s.key)!) : "",
+          ]),
+        );
+        const sumOf = (f: (r: (typeof staffSales)[number]) => number) => money(staffSales.reduce((a, r) => a + f(r), 0));
+        rows.push(["Total", "", "", sumOf((r) => r.expected), sumOf((r) => r.cash ?? 0), sumOf((r) => r.juice), sumOf((r) => r.short), ""]);
       }
 
       section("Sales transactions", ["Time", "Transaction #", "Sold by", "Payment", "Items", "Status", "Total (PHP)"]);
@@ -264,6 +306,10 @@ export function SummaryView() {
             </Card>
 
           </div>
+
+          {staffSales.length > 0 && (
+            <StaffCashTable date={date} rows={staffSales} totalSales={t.sales} onSaved={reload} />
+          )}
 
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>

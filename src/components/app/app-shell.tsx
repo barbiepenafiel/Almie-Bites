@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   PackagePlus,
+  PackageX,
   Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,7 @@ const STAFF_NAV = [
   { href: "/assignments", label: "Daily Assignments", icon: ClipboardList },
   { href: "/requests", label: "Supply Requests", icon: PackagePlus },
   { href: "/staff-sales", label: "Staff Sales", icon: LineChart },
+  { href: "/unsold", label: "Unsold Products", icon: PackageX },
   { href: "/staff-payroll", label: "Staff Earnings & Pay", icon: HandCoins },
   { href: "/daily-closing", label: "Daily Closing", icon: ClipboardCheck },
 ];

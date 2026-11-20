@@ -38,6 +38,17 @@ export function StaffDashboard() {
   const manual = profile?.earning_type === "manual";
   const upcoming = tiered ? nextTier(profile?.pay_tiers, s?.sales_total ?? 0) : null;
 
+  // What is still unsold today: assigned pieces not sold yet, or products with no sales at all.
+  const unsold = (data?.products ?? [])
+    .map((p) => {
+      const left = p.assigned_qty !== null ? Math.max(0, Number(p.assigned_qty) - Number(p.sold_today)) : null;
+      return { ...p, left, value: left !== null ? left * Number(p.selling_price) : 0 };
+    })
+    .filter((p) => (p.left !== null ? p.left > 0 : Number(p.sold_today) === 0))
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
+  const unsoldPieces = unsold.reduce((a, p) => a + (p.left ?? 0), 0);
+  const unsoldValue = unsold.reduce((a, p) => a + p.value, 0);
+
   return (
     <>
       <div className="mb-6">
@@ -83,6 +94,66 @@ export function StaffDashboard() {
           hint="Assigned & in stock"
         />
       </div>
+
+      {!busy && !!data?.products.length && (
+        <Card className="mb-6 gap-0 py-0">
+          <CardHeader className="border-b py-4">
+            <CardTitle>Unsold products today</CardTitle>
+            <CardAction>
+              <Link href="/staff/unsold" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+                Yesterday <ArrowRight />
+              </Link>
+            </CardAction>
+            <CardDescription>
+              {unsold.length === 0
+                ? "Everything assigned to you today is sold. Great job!"
+                : unsoldPieces > 0
+                  ? `${formatQty(unsoldPieces)} pieces left · worth ${formatPeso(unsoldValue)} if sold`
+                  : `${unsold.length} ${unsold.length === 1 ? "product has" : "products have"} no sales yet`}
+            </CardDescription>
+          </CardHeader>
+          {unsold.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="pl-4">Product</TableHead>
+                  <TableHead className="text-right">Assigned</TableHead>
+                  <TableHead className="text-right">Sold</TableHead>
+                  <TableHead className="text-right">Unsold</TableHead>
+                  <TableHead className="pr-4 text-right">Value</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {unsold.map((p) => (
+                  <TableRow key={p.product_id}>
+                    <TableCell className="pl-4">
+                      <div className="font-medium">{p.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatPeso(p.selling_price)} each</div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{p.assigned_qty !== null ? formatQty(p.assigned_qty) : "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatQty(p.sold_today)}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums text-warning">
+                      {p.left !== null ? formatQty(p.left) : "No sales yet"}
+                    </TableCell>
+                    <TableCell className="pr-4 text-right tabular-nums">{p.left !== null ? formatPeso(p.value) : "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+              {unsoldPieces > 0 && (
+                <TableFooter>
+                  <TableRow>
+                    <TableCell className="pl-4">Total unsold</TableCell>
+                    <TableCell />
+                    <TableCell />
+                    <TableCell className="text-right tabular-nums">{formatQty(unsoldPieces)}</TableCell>
+                    <TableCell className="pr-4 text-right tabular-nums">{formatPeso(unsoldValue)}</TableCell>
+                  </TableRow>
+                </TableFooter>
+              )}
+            </Table>
+          )}
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <Card className="gap-0 py-0">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CircleUser, History, Home, LogOut, PackagePlus, ShoppingBag, Wallet, ReceiptText } from "lucide-react";
+import { CircleUser, History, Home, LogOut, PackagePlus, PackageX, ShoppingBag, Wallet, ReceiptText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
@@ -15,10 +15,13 @@ const NAV = [
   { href: "/staff/sell", label: "Record Sale", short: "Sell", icon: ShoppingBag },
   { href: "/staff/requests", label: "Request Supplies", short: "Request", icon: PackagePlus },
   { href: "/staff/sales", label: "My Sales", short: "Sales", icon: History },
+  { href: "/staff/unsold", label: "Unsold Yesterday", short: "Unsold", icon: PackageX },
   { href: "/staff/earnings", label: "My Earnings", short: "Earnings", icon: Wallet },
   { href: "/staff/payments", label: "My Payment History", short: "Payments", icon: ReceiptText },
   { href: "/staff/account", label: "Account", short: "Account", icon: CircleUser },
 ];
+// Bottom bar on phones (5 slots); the rest stay in the sidebar / top bar.
+const MOBILE_NAV = ["/staff", "/staff/sell", "/staff/requests", "/staff/sales", "/staff/earnings"];
 
 function isActive(pathname: string, href: string) {
   return href === "/staff" ? pathname === "/staff" : pathname === href || pathname.startsWith(href + "/");
@@ -107,7 +110,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
           aria-label="Staff"
           className="no-print fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
         >
-          {NAV.slice(0, 5).map(({ href, short, icon: Icon }) => {
+          {NAV.filter((n) => MOBILE_NAV.includes(n.href)).map(({ href, short, icon: Icon }) => {
             const active = isActive(pathname, href);
             return (
               <Link
